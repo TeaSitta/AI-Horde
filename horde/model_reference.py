@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
 import os
+import re
 from datetime import datetime
 
 import requests
@@ -15,6 +16,7 @@ class ModelReference(PrimaryTimedFunction):
     quorum = None
     reference = None
     text_reference = None
+    matched_model_name = None
     stable_diffusion_names = set()
     text_model_names = set()
     nsfw_models = set()
@@ -125,10 +127,17 @@ class ModelReference(PrimaryTimedFunction):
         usermodel = model_name.split("::")
         if len(usermodel) == 2:
             model_name = usermodel[0]
-        if not self.text_reference.get(model_name):
+        # Match base model name even if it includes a suffix (quant type)
+        for base_model in self.text_reference.keys():
+            match = re.fullmatch(fr"^({re.escape(base_model)})(.+)$", model_name)
+            if match and match.group(2):
+                self.matched_model_name = match.group(1)
+            elif match:
+                self.matched_model_name = match
+        if not self.text_reference.get(self.matched_model_name):
             return 1
-        multiplier = int(self.text_reference[model_name]["parameters"]) / 1000000000
-        logger.debug(f"{model_name} param multiplier: {multiplier}")
+        multiplier = int(self.text_reference[self.matched_model_name]["parameters"]) / 1000000000
+        logger.debug(f"{model_name} as {self.matched_model_name} param multiplier: {multiplier}")
         return multiplier
 
     def has_inpainting_models(self, model_names):
@@ -155,7 +164,12 @@ class ModelReference(PrimaryTimedFunction):
         usermodel = model_name.split("::")
         if len(usermodel) == 2:
             model_name = usermodel[0]
-        return model_name in self.get_text_model_names()
+        # Match and return base model_name even if it includes a suffix (quant type)
+        for mn in self.text_reference.keys():
+            match = re.fullmatch(fr"^({re.escape(mn)})(?:.+)$", model_name)
+            if match:
+                return model_name
+        return None
 
     def has_unknown_models(self, model_names):
         if len(model_names) == 0:
